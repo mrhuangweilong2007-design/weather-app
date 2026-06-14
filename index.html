@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#2A6FB5" />
+  <title>Weather</title>
+
+  <!-- SF Pro isn't publicly distributable, so Inter stands in as the closest
+       neutral, geometric UI face — same role iOS gives San Francisco. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ============================================================
+       DESIGN TOKENS
+       The background gradient is the signature element: it shifts
+       per weather condition (clear / cloudy / rain / snow / storm /
+       mist) and per time of day (day / night), exactly like the
+       iOS Weather app's full-screen condition backdrop.
+       ============================================================ */
+    :root {
+      --text-primary: #FFFFFF;
+      --text-secondary: rgba(255, 255, 255, 0.75);
+      --text-tertiary: rgba(255, 255, 255, 0.5);
+
+      --glass-bg: rgba(255, 255, 255, 0.12);
+      --glass-bg-strong: rgba(255, 255, 255, 0.18);
+      --glass-border: rgba(255, 255, 255, 0.25);
+      --glass-blur: 24px;
+
+      --radius-xl: 28px;
+      --radius-lg: 20px;
+      --radius-md: 14px;
+
+      --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+
+      /* Default backdrop: clear day sky */
+      --bg-grad: linear-gradient(160deg, #4FA8E0 0%, #2A6FB5 55%, #1B4F8A 100%);
+    }
+
+    /* --- Condition backdrops, applied to <body> via data-weather --- */
+    body[data-weather="clear-day"] {
+      --bg-grad: linear-gradient(160deg, #5FBCF0 0%, #2E86D6 55%, #1B4F8A 100%);
+    }
+    body[data-weather="clear-night"] {
+      --bg-grad: linear-gradient(160deg, #1B2A4A 0%, #0E1A33 55%, #060B1A 100%);
+    }
+    body[data-weather="clouds-day"] {
+      --bg-grad: linear-gradient(160deg, #7C97AD 0%, #5C7A94 55%, #3E5670 100%);
+    }
+    body[data-weather="clouds-night"] {
+      --bg-grad: linear-gradient(160deg, #303B4E 0%, #232B3C 55%, #141A27 100%);
+    }
+    body[data-weather="rain-day"] {
+      --bg-grad: linear-gradient(160deg, #5C7185 0%, #44566B 55%, #2C3A4C 100%);
+    }
+    body[data-weather="rain-night"] {
+      --bg-grad: linear-gradient(160deg, #232E3D 0%, #1A222E 55%, #0F141C 100%);
+    }
+    body[data-weather="snow"] {
+      --bg-grad: linear-gradient(160deg, #B9CBDA 0%, #8FA9C2 55%, #6E89A6 100%);
+    }
+    body[data-weather="storm"] {
+      --bg-grad: linear-gradient(160deg, #4A4E5C 0%, #33363F 55%, #1C1E25 100%);
+    }
+    body[data-weather="mist"] {
+      --bg-grad: linear-gradient(160deg, #A7B4BD 0%, #8B9AA6 55%, #6D7E8C 100%);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      height: 100%;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: var(--bg-grad);
+      transition: background 1.1s var(--ease);
+      overflow-x: hidden;
+      position: relative;
+    }
+
+    /* Subtle ambient light sweep — gives the gradient depth without
+       adding visual noise (the "one risk" for this build). */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: -20%;
+      background: radial-gradient(circle at 25% 15%, rgba(255, 255, 255, 0.18), transparent 45%);
+      pointer-events: none;
+      mix-blend-mode: soft-light;
+    }
+
+    /* ============================================================
+       LAYOUT SHELL
+       ============================================================ */
+    .app {
+      width: 100%;
+      max-width: 420px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      z-index: 1;
+    }
+
+    /* --- Search bar: pill-shaped, frosted, iOS search-field style --- */
+    .search-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      backdrop-filter: blur(var(--glass-blur));
+      -webkit-backdrop-filter: blur(var(--glass-blur));
+      border-radius: 100px;
+      padding: 12px 18px;
+      transition: background 0.2s var(--ease), border-color 0.2s var(--ease);
+    }
+
+    .search-bar:focus-within {
+      background: var(--glass-bg-strong);
+      border-color: rgba(255, 255, 255, 0.4);
+    }
+
+    .search-icon {
+      flex-shrink: 0;
+      opacity: 0.7;
+    }
+
+    .city-input {
+      flex: 1;
+      min-width: 0;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text-primary);
+      font-family: 'Inter', sans-serif;
+      font-size: 1rem;
+      font-weight: 500;
+    }
+
+    .city-input::placeholder {
+      color: var(--text-tertiary);
+      font-weight: 400;
+    }
+
+    .search-button {
+      flex-shrink: 0;
+      background: rgba(255, 255, 255, 0.9);
+      color: #1B4F8A;
+      border: none;
+      border-radius: 100px;
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+      font-size: 0.9rem;
+      padding: 10px 18px;
+      cursor: pointer;
+      transition: transform 0.12s var(--ease), background 0.15s var(--ease), opacity 0.15s var(--ease);
+    }
+
+    .search-button:hover {
+      background: #FFFFFF;
+    }
+
+    .search-button:active {
+      transform: scale(0.95);
+    }
+
+    .search-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .search-button:focus-visible,
+    .city-input:focus-visible {
+      outline: 2px solid rgba(255, 255, 255, 0.8);
+      outline-offset: 2px;
+    }
+
+    /* ============================================================
+       RESULT STAGE — placeholder, loading, weather card, or error
+       ============================================================ */
+    .stage {
+      min-height: 420px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* --- Placeholder (first load) --- */
+    .placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      text-align: center;
+      color: var(--text-secondary);
+      padding: 40px 24px;
+    }
+
+    .placeholder svg {
+      opacity: 0.5;
+    }
+
+    .placeholder .title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .placeholder .subtitle {
+      font-size: 0.9rem;
+      max-width: 240px;
+      line-height: 1.5;
+    }
+
+    /* --- Loading state --- */
+    .loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      font-weight: 500;
+    }
+
+    .spinner {
+      width: 38px;
+      height: 38px;
+      border: 3px solid rgba(255, 255, 255, 0.2);
+      border-top-color: #FFFFFF;
+      border-radius: 50%;
+      animation: spin 0.85s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* --- Weather card --- */
+    .weather-card {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      animation: rise 0.5s var(--ease);
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .location-row {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      font-size: 1.4rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    .location-row .country {
+      font-size: 1rem;
+      font-weight: 400;
+      color: var(--text-tertiary);
+    }
+
+    .updated-at {
+      font-size: 0.8rem;
+      color: var(--text-tertiary);
+      margin-top: 2px;
+    }
+
+    .weather-icon {
+      width: 140px;
+      height: 140px;
+      margin: 6px 0 -8px;
+      filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.25));
+      animation: float 5s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50%      { transform: translateY(-6px); }
+    }
+
+    .temperature {
+      font-size: 5.5rem;
+      font-weight: 300;
+      line-height: 1;
+      letter-spacing: -0.03em;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .temperature span {
+      font-size: 2.5rem;
+      font-weight: 300;
+      vertical-align: super;
+      position: relative;
+      top: 0.4rem;
+    }
+
+    .description {
+      font-size: 1.1rem;
+      font-weight: 500;
+      text-transform: capitalize;
+      margin-top: -4px;
+    }
+
+    /* --- Stat tiles: humidity / wind / feels-like, iOS detail-card style --- */
+    .stat-grid {
+      width: 100%;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .stat-tile {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      backdrop-filter: blur(var(--glass-blur));
+      -webkit-backdrop-filter: blur(var(--glass-blur));
+      border-radius: var(--radius-md);
+      padding: 14px 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .stat-tile svg {
+      opacity: 0.75;
+    }
+
+    .stat-value {
+      font-size: 1.05rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stat-label {
+      font-size: 0.72rem;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    /* --- Error message --- */
+    .error-message {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      text-align: center;
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      backdrop-filter: blur(var(--glass-blur));
+      -webkit-backdrop-filter: blur(var(--glass-blur));
+      border-radius: var(--radius-lg);
+      padding: 36px 28px;
+      width: 100%;
+      animation: rise 0.4s var(--ease);
+    }
+
+    .error-message .error-title {
+      font-weight: 600;
+      font-size: 1.05rem;
+    }
+
+    .error-message .error-detail {
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+      max-width: 260px;
+      line-height: 1.5;
+    }
+
+    .retry-button {
+      background: rgba(255, 255, 255, 0.9);
+      color: #1B4F8A;
+      border: none;
+      border-radius: 100px;
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+      font-size: 0.85rem;
+      padding: 10px 22px;
+      cursor: pointer;
+      transition: transform 0.12s var(--ease), background 0.15s var(--ease);
+    }
+
+    .retry-button:hover {
+      background: #FFFFFF;
+    }
+
+    .retry-button:active {
+      transform: scale(0.95);
+    }
+
+    /* ============================================================
+       RESPONSIVE — mobile fine-tuning
+       ============================================================ */
+    @media (max-width: 380px) {
+      .temperature { font-size: 4.5rem; }
+      .weather-icon { width: 110px; height: 110px; }
+      .stat-grid { gap: 8px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .spinner { animation-duration: 1.6s; }
+      .weather-card, .error-message { animation: none; }
+      .weather-icon { animation: none; }
+      body { transition: none; }
+    }
+  </style>
+</head>
+<body data-weather="clear-day">
+
+  <div class="app">
+    <!-- Search bar -->
+    <form id="search-form" class="search-bar">
+      <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="11" cy="11" r="7" stroke="white" stroke-width="2"/>
+        <path d="M20 20L16.5 16.5" stroke="white" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <label for="city-input" style="position:absolute; left:-9999px;">City name</label>
+      <input
+        type="text"
+        id="city-input"
+        class="city-input"
+        placeholder="Search for a city"
+        autocomplete="off"
+        required
+      />
+      <button type="submit" id="search-button" class="search-button">Cari</button>
+    </form>
+
+    <!-- Result stage -->
+    <div id="stage" class="stage">
+      <div class="placeholder">
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M6 18a4 4 0 0 1-.5-7.97A5.5 5.5 0 0 1 16.2 8.04 4.5 4.5 0 0 1 17.5 17h-11.5z"
+                stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
+        </svg>
+        <p class="title">No city selected</p>
+        <p class="subtitle">Search for a city above to see its current conditions.</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ============================================================
+       CONFIGURATION
+       Replace YOUR_API_KEY with a real OpenWeatherMap API key.
+       Get one for free at: https://openweathermap.org/api
+       ============================================================ */
+    const API_KEY = "bb883dca1fe2a43bf61f0a54748b3d85";
+    const BASE_URL = "https://api.openweathermap.org/data/2.5/weather";
+
+    const form = document.getElementById("search-form");
+    const cityInput = document.getElementById("city-input");
+    const searchButton = document.getElementById("search-button");
+    const stage = document.getElementById("stage");
+
+    /* ------------------------------------------------------------
+       ICON LIBRARY
+       Custom line-art SVG icons (instead of OpenWeatherMap's bitmap
+       icons) so the result matches the app's own visual language —
+       same idea as iOS Weather's native glyph set.
+       ------------------------------------------------------------ */
+    const ICONS = {
+      sun: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="5" fill="#FFD23F"/>
+        <g stroke="#FFD23F" stroke-width="2" stroke-linecap="round">
+          <path d="M12 1v3M12 20v3M1 12h3M20 12h3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>
+        </g>
+      </svg>`,
+      moon: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" fill="#E8ECF4"/>
+      </svg>`,
+      cloud: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M6.5 18a4.5 4.5 0 0 1-.5-8.97A6 6 0 0 1 17.4 8.2 5 5 0 0 1 18.5 18h-12z" fill="#E3E9F0"/>
+      </svg>`,
+      "cloud-sun": `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="8.5" cy="8" r="3.5" fill="#FFD23F"/>
+        <g stroke="#FFD23F" stroke-width="1.6" stroke-linecap="round">
+          <path d="M8.5 1.5v2M8.5 12.5v2M2 8h2M13 8h2M4.1 3.6l1.4 1.4M11.5 11l1.4 1.4M4.1 12.4l1.4-1.4M11.5 5l1.4-1.4"/>
+        </g>
+        <path d="M7.5 19a4.5 4.5 0 0 1-.5-8.97A6 6 0 0 1 18.4 9.2 5 5 0 0 1 19.5 19h-12z" fill="#E3E9F0"/>
+      </svg>`,
+      "cloud-moon": `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M16 7.5a5.2 5.2 0 1 1-5.7-5.18A4.1 4.1 0 0 0 16 7.5z" fill="#E8ECF4"/>
+        <path d="M7.5 19a4.5 4.5 0 0 1-.5-8.97A6 6 0 0 1 18.4 9.2 5 5 0 0 1 19.5 19h-12z" fill="#C9D2DE"/>
+      </svg>`,
+      rain: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M6.5 14a4.5 4.5 0 0 1-.5-8.97A6 6 0 0 1 17.4 4.2 5 5 0 0 1 18.5 14h-12z" fill="#CBD5E1"/>
+        <g stroke="#9FC6FF" stroke-width="2" stroke-linecap="round">
+          <path d="M8 17l-1.2 2.4M12 17l-1.2 2.4M16 17l-1.2 2.4"/>
+        </g>
+      </svg>`,
+      storm: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M6.5 13a4.5 4.5 0 0 1-.5-8.97A6 6 0 0 1 17.4 3.2 5 5 0 0 1 18.5 13h-12z" fill="#9AA7B8"/>
+        <path d="M13 12l-3 5h2.5L11 22l4.5-7H13l1.5-3z" fill="#FFD23F"/>
+      </svg>`,
+      snow: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M6.5 13a4.5 4.5 0 0 1-.5-8.97A6 6 0 0 1 17.4 3.2 5 5 0 0 1 18.5 13h-12z" fill="#DCE6F2"/>
+        <g stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round">
+          <path d="M8 16.5v5M5.5 18l5 2M10.5 18l-5 2M16 16.5v5M13.5 18l5 2M18.5 18l-5 2"/>
+        </g>
+      </svg>`,
+      mist: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <g stroke="#D7DEE7" stroke-width="2" stroke-linecap="round">
+          <path d="M4 7h16M2 12h20M5 17h14"/>
+        </g>
+      </svg>`
+    };
+
+    /**
+     * Maps an OpenWeatherMap condition code + day/night flag to:
+     *  - an icon key from ICONS
+     *  - a background "scene" key for the body[data-weather] attribute
+     * Full code reference: https://openweathermap.org/weather-conditions
+     */
+    function mapCondition(code, isDay) {
+      const dn = isDay ? "day" : "night";
+
+      if (code >= 200 && code < 300) return { icon: "storm", scene: "storm" };
+      if (code >= 300 && code < 600) return { icon: "rain", scene: `rain-${dn}` };
+      if (code >= 600 && code < 700) return { icon: "snow", scene: "snow" };
+      if (code >= 700 && code < 800) return { icon: "mist", scene: "mist" };
+      if (code === 800) return { icon: isDay ? "sun" : "moon", scene: `clear-${dn}` };
+      if (code === 801 || code === 802) return { icon: isDay ? "cloud-sun" : "cloud-moon", scene: `clouds-${dn}` };
+      return { icon: "cloud", scene: `clouds-${dn}` };
+    }
+
+    /**
+     * Determines if it's currently daytime at the location using the
+     * sunrise/sunset timestamps OpenWeatherMap returns (UTC seconds).
+     */
+    function isDaytime(data) {
+      const now = data.dt;
+      return now >= data.sys.sunrise && now < data.sys.sunset;
+    }
+
+    /**
+     * Renders the loading spinner inside the stage.
+     */
+    function renderLoading() {
+      stage.innerHTML = `
+        <div class="loading" role="status" aria-live="polite">
+          <div class="spinner" aria-hidden="true"></div>
+          <span>Fetching weather data…</span>
+        </div>
+      `;
+    }
+
+    /**
+     * Renders the full weather card: location, icon, temperature,
+     * description, and a stat grid (feels like / humidity / wind).
+     */
+    function renderWeather(data) {
+      const cityName = data.name;
+      const country = data.sys?.country ?? "";
+      const temp = Math.round(data.main.temp);
+      const feelsLike = Math.round(data.main.feels_like);
+      const humidity = data.main.humidity;
+      const windKmh = Math.round(data.wind.speed * 3.6); // m/s -> km/h
+      const description = data.weather[0].description;
+      const code = data.weather[0].id;
+      const day = isDaytime(data);
+
+      const { icon, scene } = mapCondition(code, day);
+
+      // Update the full-screen backdrop to match conditions + time of day
+      document.body.setAttribute("data-weather", scene);
+
+      const updated = new Date(data.dt * 1000).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+
+      stage.innerHTML = `
+        <div class="weather-card" aria-live="polite">
+          <div class="location-row">
+            <span>${cityName}</span>
+            ${country ? `<span class="country">${country}</span>` : ""}
+          </div>
+          <span class="updated-at">Updated ${updated}</span>
+
+          <div class="weather-icon" aria-hidden="true">${ICONS[icon]}</div>
+
+          <div class="temperature">${temp}<span>°</span></div>
+          <div class="description">${description}</div>
+
+          <div class="stat-grid">
+            <div class="stat-tile">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 14.76V3.5a2 2 0 0 0-4 0v11.26a4 4 0 1 0 4 0z"/>
+              </svg>
+              <span class="stat-value">${feelsLike}°</span>
+              <span class="stat-label">Feels like</span>
+            </div>
+            <div class="stat-tile">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3C9 7 6 10.5 6 14a6 6 0 0 0 12 0c0-3.5-3-7-6-11z"/>
+              </svg>
+              <span class="stat-value">${humidity}%</span>
+              <span class="stat-label">Humidity</span>
+            </div>
+            <div class="stat-tile">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h12a3 3 0 1 0-3-3M3 18h15a3 3 0 1 0-3-3M3 6h9a3 3 0 1 1-3 3"/>
+              </svg>
+              <span class="stat-value">${windKmh}</span>
+              <span class="stat-label">km/h</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    /**
+     * Renders an error message with a retry action that refocuses
+     * the search input.
+     */
+    function renderError(title, detail) {
+      stage.innerHTML = `
+        <div class="error-message" role="alert">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9"/>
+            <path d="M12 8v5M12 16h.01"/>
+          </svg>
+          <span class="error-title">${title}</span>
+          <span class="error-detail">${detail}</span>
+          <button type="button" class="retry-button" id="retry-button">Try again</button>
+        </div>
+      `;
+
+      document.getElementById("retry-button")?.addEventListener("click", () => {
+        cityInput.focus();
+      });
+    }
+
+    /**
+     * Fetches current weather for the given city and updates the
+     * stage (loading -> weather card / error) plus the background scene.
+     */
+    async function fetchWeather(city) {
+      renderLoading();
+      searchButton.disabled = true;
+
+      const url = `${BASE_URL}?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=metric`;
+
+      try {
+        const response = await fetch(url);
+
+        if (response.status === 404) {
+          renderError("City not found", "Check the spelling and try again.");
+          return;
+        }
+
+        if (!response.ok) {
+          renderError("Something went wrong", "The weather service returned an error. Please try again later.");
+          return;
+        }
+
+        const data = await response.json();
+        renderWeather(data);
+
+      } catch (err) {
+        renderError("Network error", "Check your internet connection and try again.");
+      } finally {
+        searchButton.disabled = false;
+      }
+    }
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+
+      const city = cityInput.value.trim();
+      if (!city) {
+        renderError("Empty input", "Type a city name before searching.");
+        return;
+      }
+
+      fetchWeather(city);
+    });
+  </script>
+
+</body>
+</html>
